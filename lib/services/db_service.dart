@@ -8,7 +8,7 @@ class DbService {
 
   static Database? _database;
 
-  static const int _dbVersion = 1;
+  static const int _dbVersion = 2;
   static const String _dbName = 'library.db';
 
   Future<Database> get database async {
@@ -78,11 +78,29 @@ class DbService {
         FOREIGN KEY (book_id) REFERENCES books(id)
       )
     ''');
+
+    await _createBookRequestsTable(db);
+  }
+
+  Future<void> _createBookRequestsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS book_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        author TEXT NOT NULL,
+        message TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      )
+    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // Ileride tablo degisiklikleri icin
-    // if (oldVersion < 2) { ... }
+    if (oldVersion < 2) {
+      await _createBookRequestsTable(db);
+    }
   }
 
   // --- Helper Fonksiyonlar ---
@@ -157,6 +175,7 @@ class DbService {
   }
 
   Future<void> clearAllTables() async {
+    await clearTable('book_requests');
     await clearTable('cart_items');
     await clearTable('sales');
     await clearTable('books');

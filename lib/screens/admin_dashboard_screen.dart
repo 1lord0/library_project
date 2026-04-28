@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -5,9 +8,11 @@ import '../constants/app_strings.dart';
 import '../constants/app_theme.dart';
 import '../models/sale_model.dart';
 import '../services/auth_service.dart';
+import '../services/book_request_service.dart';
 import '../services/sale_service.dart';
 import '../widgets/app_state_widgets.dart';
 import 'admin_books_screen.dart';
+import 'admin_requests_screen.dart';
 import 'admin_users_screen.dart';
 import 'reset_demo_screen.dart';
 
@@ -20,6 +25,7 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final SaleService _saleService = SaleService();
+  final BookRequestService _requestService = BookRequestService();
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -27,6 +33,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _totalUsers = 0;
   int _totalSales = 0;
   double _totalRevenue = 0;
+  int _pendingRequests = 0;
   List<SaleModel> _recentSales = [];
   List<Map<String, dynamic>> _topBooks = [];
   List<Map<String, dynamic>> _monthlySummary = [];
@@ -52,6 +59,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _saleService.recentSales(limit: 10),
         _saleService.topSellingBooks(limit: 5),
         _saleService.monthlySummary(),
+        _requestService.pendingCount(),
       ]);
 
       if (!mounted) return;
@@ -63,6 +71,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _recentSales = results[4] as List<SaleModel>;
         _topBooks = results[5] as List<Map<String, dynamic>>;
         _monthlySummary = results[6] as List<Map<String, dynamic>>;
+        _pendingRequests = results[7] as int;
         _isLoading = false;
       });
     } catch (_) {
@@ -294,6 +303,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ),
         const SizedBox(height: 10),
         _buildMenuCard(
+          icon: Icons.post_add_rounded,
+          title: 'Kitap Istekleri',
+          subtitle: _pendingRequests > 0
+              ? '$_pendingRequests bekleyen istek var. Kullanici taleplerini incele.'
+              : 'Kullanicilarin kitap taleplerini goruntule ve yonet.',
+          color: _pendingRequests > 0 ? Colors.orange : Colors.blueGrey,
+          badge: _pendingRequests > 0 ? _pendingRequests : null,
+          onTap: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AdminRequestsScreen()),
+            );
+            _loadData();
+          },
+        ),
+        const SizedBox(height: 10),
+        _buildMenuCard(
           icon: Icons.restore_rounded,
           title: 'Demo Kontrol Paneli',
           subtitle: 'Sistemi boz, sifirla ve sunum akisini hizla yonet.',
@@ -331,6 +357,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     required String subtitle,
     required Color color,
     required VoidCallback onTap,
+    int? badge,
   }) {
     return Card(
       margin: EdgeInsets.zero,
@@ -377,6 +404,26 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ],
                 ),
               ),
+              if (badge != null)
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '$badge',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
               Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
             ],
           ),
@@ -499,59 +546,276 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       );
     }
 
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: _monthlySummary.map((row) {
-            final month = row['month'] as String? ?? '';
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.adminSurface,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      _formatMonth(month),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      '${(row['sale_count'] as num?)?.toInt() ?? 0} satis',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      '${(row['total_quantity'] as num?)?.toInt() ?? 0} adet',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      '${((row['total_revenue'] as num?)?.toDouble() ?? 0).toStringAsFixed(2)} TL',
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(
+    final salesData = _monthlySummary
+        .map((row) => (row['total_quantity'] as num?)?.toDouble() ?? 0)
+        .toList();
+    final revenueData = _monthlySummary
+        .map((row) => (row['total_revenue'] as num?)?.toDouble() ?? 0)
+        .toList();
+    final monthLabels = _monthlySummary
+        .map((row) => _formatMonthShort(row['month'] as String? ?? ''))
+        .toList();
+
+    final maxSales = salesData.reduce(math.max);
+    final maxRevenue = revenueData.reduce(math.max);
+
+    return Column(
+      children: [
+        Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
                         color: AppColors.adminPrimary,
-                        fontWeight: FontWeight.w700,
+                        borderRadius: BorderRadius.circular(3),
                       ),
                     ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Aylik Satis Adetleri',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 180,
+                  child: BarChart(
+                    BarChartData(
+                      alignment: BarChartAlignment.spaceAround,
+                      maxY: maxSales * 1.2,
+                      barTouchData: BarTouchData(
+                        touchTooltipData: BarTouchTooltipData(
+                          tooltipRoundedRadius: 8,
+                          getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                            return BarTooltipItem(
+                              '${monthLabels[group.x]}\n${rod.toY.toInt()} adet',
+                              const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      titlesData: FlTitlesData(
+                        show: true,
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            getTitlesWidget: (value, meta) {
+                              final index = value.toInt();
+                              if (index < 0 || index >= monthLabels.length) {
+                                return const SizedBox.shrink();
+                              }
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                  monthLabels[index],
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
+                              );
+                            },
+                            reservedSize: 28,
+                          ),
+                        ),
+                        leftTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        topTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        rightTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                      ),
+                      gridData: const FlGridData(show: false),
+                      borderData: FlBorderData(show: false),
+                      barGroups: List.generate(salesData.length, (i) {
+                        return BarChartGroupData(
+                          x: i,
+                          barRods: [
+                            BarChartRodData(
+                              toY: salesData[i],
+                              color: AppColors.adminPrimary,
+                              width: 18,
+                              borderRadius: const BorderRadius.only(
+                                topLeft: Radius.circular(6),
+                                topRight: Radius.circular(6),
+                              ),
+                            ),
+                          ],
+                        );
+                      }),
+                    ),
                   ),
-                ],
-              ),
-            );
-          }).toList(),
+                ),
+              ],
+            ),
+          ),
         ),
-      ),
+        const SizedBox(height: 14),
+        Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: Colors.teal,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Aylik Gelir (TL)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 180,
+                  child: LineChart(
+                    LineChartData(
+                      maxY: maxRevenue * 1.2,
+                      minY: 0,
+                      lineTouchData: LineTouchData(
+                        touchTooltipData: LineTouchTooltipData(
+                          tooltipRoundedRadius: 8,
+                          getTooltipItems: (spots) {
+                            return spots.map((spot) {
+                              return LineTooltipItem(
+                                '${monthLabels[spot.x.toInt()]}\n${spot.y.toStringAsFixed(0)} TL',
+                                const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                ),
+                              );
+                            }).toList();
+                          },
+                        ),
+                      ),
+                      titlesData: FlTitlesData(
+                        show: true,
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            getTitlesWidget: (value, meta) {
+                              final index = value.toInt();
+                              if (index < 0 ||
+                                  index >= monthLabels.length ||
+                                  value != index.toDouble()) {
+                                return const SizedBox.shrink();
+                              }
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                  monthLabels[index],
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
+                              );
+                            },
+                            reservedSize: 28,
+                          ),
+                        ),
+                        leftTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        topTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        rightTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                      ),
+                      gridData: FlGridData(
+                        show: true,
+                        drawVerticalLine: false,
+                        horizontalInterval: maxRevenue > 0 ? maxRevenue / 4 : 1,
+                        getDrawingHorizontalLine: (value) => FlLine(
+                          color: Colors.grey.shade200,
+                          strokeWidth: 1,
+                        ),
+                      ),
+                      borderData: FlBorderData(show: false),
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: List.generate(revenueData.length, (i) {
+                            return FlSpot(i.toDouble(), revenueData[i]);
+                          }),
+                          isCurved: true,
+                          curveSmoothness: 0.3,
+                          color: Colors.teal,
+                          barWidth: 3,
+                          isStrokeCapRound: true,
+                          dotData: FlDotData(
+                            show: true,
+                            getDotPainter: (spot, percent, barData, index) {
+                              return FlDotCirclePainter(
+                                radius: 4,
+                                color: Colors.white,
+                                strokeWidth: 2.5,
+                                strokeColor: Colors.teal,
+                              );
+                            },
+                          ),
+                          belowBarData: BarAreaData(
+                            show: true,
+                            color: Colors.teal.withAlpha(30),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
+  }
+
+  String _formatMonthShort(String yyyyMm) {
+    if (yyyyMm.length < 7) return yyyyMm;
+    final months = [
+      'Oca', 'Sub', 'Mar', 'Nis', 'May', 'Haz',
+      'Tem', 'Agu', 'Eyl', 'Eki', 'Kas', 'Ara',
+    ];
+    final parts = yyyyMm.split('-');
+    final monthIndex = int.tryParse(parts[1]) ?? 1;
+    return months[monthIndex - 1];
   }
 
   Widget _buildRecentSales() {
@@ -625,27 +889,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         },
       ),
     );
-  }
-
-  String _formatMonth(String yyyyMm) {
-    if (yyyyMm.length < 7) return yyyyMm;
-    final months = [
-      'Oca',
-      'Sub',
-      'Mar',
-      'Nis',
-      'May',
-      'Haz',
-      'Tem',
-      'Agu',
-      'Eyl',
-      'Eki',
-      'Kas',
-      'Ara',
-    ];
-    final parts = yyyyMm.split('-');
-    final monthIndex = int.tryParse(parts[1]) ?? 1;
-    return '${months[monthIndex - 1]} ${parts[0]}';
   }
 
   String _formatDate(String? dateStr) {

@@ -5,6 +5,7 @@ import '../constants/app_strings.dart';
 import '../constants/app_theme.dart';
 import '../models/book_model.dart';
 import '../services/auth_service.dart';
+import '../services/book_request_service.dart';
 import '../services/book_service.dart';
 import '../services/cart_service.dart';
 import '../widgets/app_state_widgets.dart';
@@ -23,6 +24,7 @@ class UserHomeScreen extends StatefulWidget {
 class _UserHomeScreenState extends State<UserHomeScreen> {
   final BookService _bookService = BookService();
   final CartService _cartService = CartService();
+  final BookRequestService _requestService = BookRequestService();
   final _searchController = TextEditingController();
 
   List<BookModel> _books = [];
@@ -141,6 +143,96 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
     _loadData();
   }
 
+  Future<void> _showRequestDialog() async {
+    final titleController = TextEditingController();
+    final authorController = TextEditingController();
+    final messageController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Kitap Istegi'),
+        content: Form(
+          key: formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Katalogda bulamadiginiz bir kitabi admin ekibinden talep edin.',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: 'Kitap Adi',
+                    prefixIcon: Icon(Icons.menu_book_outlined),
+                  ),
+                  validator: (v) =>
+                      v == null || v.trim().isEmpty ? 'Kitap adi gerekli' : null,
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: authorController,
+                  decoration: const InputDecoration(
+                    labelText: 'Yazar',
+                    prefixIcon: Icon(Icons.person_outline),
+                  ),
+                  validator: (v) =>
+                      v == null || v.trim().isEmpty ? 'Yazar gerekli' : null,
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: messageController,
+                  decoration: const InputDecoration(
+                    labelText: 'Not (istege bagli)',
+                    prefixIcon: Icon(Icons.note_outlined),
+                  ),
+                  maxLines: 2,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Iptal'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(ctx, true);
+              }
+            },
+            child: const Text('Gonder'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != true || !mounted) return;
+
+    final userId = context.read<AuthService>().currentUser!.id!;
+    await _requestService.createRequest(
+      userId: userId,
+      title: titleController.text.trim(),
+      author: authorController.text.trim(),
+      message: messageController.text.trim().isEmpty
+          ? null
+          : messageController.text.trim(),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Kitap isteginiz admin ekibine iletildi')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final userName = context.read<AuthService>().currentUser?.name ?? 'Okur';
@@ -160,6 +252,11 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
           },
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.post_add_rounded),
+            tooltip: 'Kitap Iste',
+            onPressed: _showRequestDialog,
+          ),
           IconButton(
             icon: const Icon(Icons.shopping_cart),
             onPressed: () async {
